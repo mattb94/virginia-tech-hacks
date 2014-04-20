@@ -189,14 +189,16 @@ def checkCourses(courses)
 
 			end
 			
-			print "\n"
+			print "\n\n"
 		end
 		
 		if successes.length > 0
-			puts "These CRNs have been added successfully: \n".color(:magenta)
+			puts "These CRNs have been added successfully: ".color(:magenta)
 			successes.each_with_index do |added,i|
-				puts "#{i+1}: #{added[:crn]} - #{added[:title]}\n".color(:cyan)
+				puts "#{i+1}: #{added[:crn]} - #{added[:title]}".color(:cyan)
 			end
+			
+			puts "\n"
 		end
 
 		if courses.size == 0
