@@ -7,8 +7,9 @@ require 'stringio'
 
 #Change based on Semester
 $term = '09'
-$year = '2012'
+$year = '2014'
 $frequency = 4  #Number of Seconds between check requests
+$name = ''
 
 $agent = Mechanize.new
 $agent.redirect_ok = true 
@@ -52,9 +53,7 @@ end
 #Gets Course Information
 def getCourse(crn)	
 	begin
-		courseDetails = Nokogiri::HTML( $agent.get(
-			"https://banweb.banner.vt.edu/ssb/prod/HZSKVTSC.P_ProcComments?CRN=#{crn}&TERM=#{$term}&YEAR=#{$year}"
-		).body)
+		courseDetails = Nokogiri::HTML( $agent.get("https://banweb.banner.vt.edu/ssb/prod/HZSKVTSC.P_ProcComments?CRN=#{crn}&TERM=#{$term}&YEAR=#{$year}").body)
 	rescue
 		return false #Failed to get course
 	end
@@ -66,68 +65,104 @@ def getCourse(crn)
 	course[:title] = courseDetails.css('td.title').last.text.gsub(/-\ +/, '')
 	course[:crn] = crn
 
-	courseDetails.css('table table tr').each_with_index do |row|
-		#If we have a dataSet
-		case dataSet
-			when :rowA
-				[ :i, :days, :end, :begin, :end, :exam].each_with_index do |el, i|
-					if row.css('td')[i] then
+	#begin
+		courseDetails.css('table table tr').each_with_index do |row|
+			#If we have a dataSet
+			case dataSet
+				when :rowA
+					[ :i, :days, :begin, :end, :room, :exam].each_with_index do |el, i|
+						if row.css('td')[i] then
+							course[el] = row.css('td')[i].text
+						end
+					end
+				when :rowB
+					[ :instructor, :type, :status, :seats, :capacity ].each_with_index do |el, i|
 						course[el] = row.css('td')[i].text
 					end
-				end
-			when :rowB
-				[ :instructor, :type, :status, :seats, :capacity ].each_with_index do |el, i|
-					course[el] = row.css('td')[i].text
-				end
-		end
+			end
 
-		dataSet = false
-		#Is there a dataset?
-		row.css('td').each do |cell|
-			case cell.text
-				when "Days"
-					dataSet = :rowA
-				when "Instructor"
-					dataSet = :rowB
+			dataSet = false
+			#Is there a dataset?
+			row.css('td').each do |cell|
+				case cell.text
+					when "Days"
+						dataSet = :rowA
+					when "Instructor"
+						dataSet = :rowB
+				end
 			end
 		end
-	end
+	#rescue
+		#course[:seats] = 'Full'
+	#end
 
 	return course
 end
 
 #Registers you for the given CRN, returns true if successful, false if not
-def registerCrn(crn)
-	#Follow Path
-	$agent.get("https://banweb.banner.vt.edu/ssb/prod/twbkwbis.P_GenMenu?name=bmenu.P_MainMnu")
-	reg = $agent.get("https://banweb.banner.vt.edu/ssb/prod/hzskstat.P_DispRegStatPage")
-	dropAdd = reg.link_with(:href => "/ssb/prod/bwskfreg.P_AddDropCrse?term_in=#{$year}#{$term}").click
-
-	#Fill in CRN Box and Submit
-	crnEntry = dropAdd.form_with(:action => '/ssb/prod/bwckcoms.P_Regs')
-	crnEntry.fields_with(:id => 'crn_id1').first.value = crn
-	crnEntry['CRN_IN'] = crn
-	add = crnEntry.submit(crnEntry.button_with(:value => 'Submit Changes')).body
+def registerCrn(crn, remove)
+	begin
+		#Follow Path
+		$agent.get("https://banweb.banner.vt.edu/ssb/prod/twbkwbis.P_GenMenu?name=bmenu.P_MainMnu")
+		reg = $agent.get("https://banweb.banner.vt.edu/ssb/prod/hzskstat.P_DispRegStatPage")
+		dropAdd = reg.link_with(:href => "/ssb/prod/bwskfreg.P_AddDropCrse?term_in=#{$year}#{$term}").click
+		
+		#Fill in CRN Box and Submit
+		crnEntry = dropAdd.form_with(:action => '/ssb/prod/bwckcoms.P_Regs')
+		
+		dropAddHTML = Nokogiri::HTML(dropAdd.body)
+		
+		# Removing the old class if necessary
+		counter = 0
+		if remove != ''
+			dropAddHTML.css('table table tr').each_with_index do |row, i|
+				if row.css('td')[1] != nil
+					if row.css('td')[1].text =~ /#{remove}/
+						crnEntry.field_with(:id => "action_id#{i - 2 - counter}").options[0].select
+					end
+				else
+					counter += 1
+				end
+			end
+		end
+		
+		crnEntry.fields_with(:id => 'crn_id1').first.value = crn
+		crnEntry['CRN_IN'] = crn
+		add = crnEntry.submit(crnEntry.button_with(:value => 'Submit Changes')).body
+	rescue
+		puts "Drop Add not open yet".color(:red)
+		return false
+	end
 
 	if add =~ /#{crn}/ && !(add =~ /Registration Errors/) then
 		return true
 	else
+		if remove != ''
+			crnEntry = dropAdd.form_with(:action => '/ssb/prod/bwckcoms.P_Regs')
+			crnEntry.fields_with(:id => 'crn_id1').first.value = remove
+			crnEntry['CRN_IN'] = remove
+			add = crnEntry.submit(crnEntry.button_with(:value => 'Submit Changes')).body
+			if (!add =~ /#{crn}/) || add =~ /Registration Errors/
+				raise 'Well stuff messed up: dropped the class, new class didn\'t register, couldn\'t re-register old class'
+			end
+		end
 		return false
 	end
 end
 
-#Main loop that checks the availaibility of each courses and fires to registerCrn on availaibility
+#MAIN LOOP that checks the availability of each courses and fires to registerCrn on availability
 def checkCourses(courses)
 
 	requestCount = 0
 	startTime = Time.new
+	successes = [] 
 	loop do
 		system("clear")
 
 		requestCount += 1
 		nowTime = Time.new
 
-		puts "Checking Availaibility of CRNs".color(:yellow)
+		puts "Checking Availability of CRNs for ".color(:yellow) + $name.to_s
 		puts "--------------------------------\n"
 		puts "Started:\t#{startTime.asctime}".color(:magenta)
 		puts "Now:    \t#{nowTime.asctime}".color(:cyan)
@@ -140,23 +175,35 @@ def checkCourses(courses)
 			course = getCourse(c[:crn])	
 			next unless course #If throws error
 
-			puts "Availaibility: #{course[:seats]} / #{course[:capacity]}".color(:red)
+			puts "Availability: #{course[:seats]} / #{course[:capacity]}".color(:red)
 
 			if (course[:seats] =~ /Full/) then
 			else 
-				if (registerCrn(c[:crn])) then
-					puts "CRN #{c[:crn]} Registration Sucessfull"
-					courses.slice!(i)
+				if (registerCrn(c[:crn], c[:remove])) then
+					puts "CRN #{c[:crn]} Registration Successful"
+					successes.push(courses.slice!(i))
 
 				else
 					puts "Couldn't Register"
 				end
 
 			end
-
+			
 			print "\n"
 		end
+		
+		if successes.length > 0
+			puts "These CRNs have been added successfully: \n".color(:magenta)
+			successes.each_with_index do |added,i|
+				puts "#{i+1}: #{added[:crn]} - #{added[:title]}\n".color(:cyan)
+			end
+		end
 
+		if courses.size == 0
+		puts "All classes added".color(:yellow)
+			return true
+		end
+		
 		sleep $frequency
 	end
 end
@@ -178,22 +225,45 @@ def addCourses
 
 		#Validate CRN to be 5 Digits 
 		if (input =~ /^\d{5}$/) then
-		
+			bool_removeLoop = true
+			
+			# Asks if a class needs to be taken out beforehand
+			while bool_removeLoop
+				remove = ask("\nDoes another CRN need to be removed? (yes/no) ".color(:blue)) {|q| q.echo = true}
+				if remove =~ /yes/
+					crnRemove = ask("Enter the CRN: ".color(:green)) {|q| q.echo = true}
+					if crnRemove =~ /^\d{5}$/
+						bool_removeLoop = false
+					end
+				elsif remove =~ /no/
+					crnRemove = ""
+					bool_removeLoop = false
+				end
+			end
+			
+			system("clear")
 			#Display CRN Info
 			c = getCourse(input.to_s)
+			c[:remove] = crnRemove
 			puts "\nCourse: #{c[:title]} - #{c[:crn]}".color(:red)
 			puts "--> Time: #{c[:begin]}-#{c[:end]} on #{c[:days]}".color(:cyan)
 			puts "--> Teacher: #{c[:instructor]}".color(:cyan)
 			puts "--> Type: #{c[:type]} || Status: #{c[:status]}".color(:cyan)
-			puts "--> Availability: #{c[:seats]} / #{c[:capacity]}\n".color(:cyan)
+			puts "--> Availability: #{c[:seats]} / #{c[:capacity]}".color(:cyan)
+			puts "--> CRN to Remove: #{c[:remove]}\n".color(:cyan)
+		
 
 			#Add Class Prompt
 			add = ask("Add This Class? (yes/no)".color(:yellow) + ":: ") { |q| q.echo = true }
 			crns.push(c) if (add =~ /yes/)
-
+			
 		elsif (input == "start") then
-			checkCourses(crns)
-		end 
+			if checkCourses(crns)
+				gets
+			end
+		else
+			puts "Invalid CRN"
+		end
 	end
 end
 
@@ -201,16 +271,20 @@ end
 def main
 	system("clear")
 	puts "Welcome to CourseAdd by mil".color(:blue)
+	
+	bool_Login = true
+	while bool_Login
+		$name = ask("Name ".color(:green) + ":: ") {|q| q.echo = true}
+		username = ask("PID ".color(:green) + ":: ") { |q| q.echo = true }
+		password = ask("Password ".color(:green) + ":: " ) { |q| q.echo = "*" }
 
-	username = ask("PID ".color(:green) + ":: ") { |q| q.echo = true }
-	password = ask("Password ".color(:green) + ":: " ) { |q| q.echo = "*" }
-
-	system("clear")
-	if login(username, password) then
-		addCourses
-	else
-		puts "Invalid PID/Password"
-		exit
+		system("clear")
+		if login(username, password) then
+			bool_Login = false
+			addCourses
+		else
+			puts "Invalid PID/Password".color(:red)
+		end
 	end
 end
 
