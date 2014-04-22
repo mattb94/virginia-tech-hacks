@@ -6,6 +6,8 @@ Course Add (course-add.rb)
 --------------------------------
 A script which stalks the Virginia Tech classes time table and when a class becomes available it automatically registers you for that class. Can be used to check multiple crns at once. Use at your own discretion.
 
+You can now have it drop a class that you already have if the new class opens up.
+
 Blacksburg Transit (blacksburg-transit.rb)
 ------------------------------------------
 Gets the next bus stop for the Blacksburg transit given a list of pre-determined stops. 
