@@ -8,7 +8,7 @@ require 'stringio'
 #Change based on Semester
 $term = '09'
 $year = '2014'
-$frequency = 4  #Number of Seconds between check requests
+$frequency = 1  #Number of Seconds between check requests
 $name = ''
 
 $agent = Mechanize.new
@@ -65,7 +65,9 @@ def getCourse(crn)
 	course[:title] = courseDetails.css('td.title').last.text.gsub(/-\ +/, '')
 	course[:crn] = crn
 
-	#begin
+	# Will catch a botched 'get' of the course info
+	# # Got a couple exceptions where it was trying to get the text of a null object
+	begin
 		courseDetails.css('table table tr').each_with_index do |row|
 			#If we have a dataSet
 			case dataSet
@@ -92,9 +94,9 @@ def getCourse(crn)
 				end
 			end
 		end
-	#rescue
-		#course[:seats] = 'Full'
-	#end
+	rescue
+		course[:seats] = 'Full'
+	end
 
 	return course
 end
@@ -112,16 +114,18 @@ def registerCrn(crn, remove)
 		
 		dropAddHTML = Nokogiri::HTML(dropAdd.body)
 		
-		# Removing the old class if necessary
+		# Removing the old class if one was specified
 		counter = 0
 		if remove != ''
 			dropAddHTML.css('table table tr').each_with_index do |row, i|
+				# Looks down the table to find the row with the CRN that needs to be removed
 				if row.css('td')[1] != nil
 					if row.css('td')[1].text =~ /#{remove}/
-						crnEntry.field_with(:id => "action_id#{i - 2 - counter}").options[0].select
+						# Changes the drop down for the 'Drop' column for the CRN
+						crnEntry.field_with(:id => "action_id#{i - 3 - counter}").options[0].select
 					end
 				else
-					counter += 1
+					counter += 1  # Counts how many 'empty' rows there are, ex. a class with additional times
 				end
 			end
 		end
@@ -130,6 +134,8 @@ def registerCrn(crn, remove)
 		crnEntry['CRN_IN'] = crn
 		add = crnEntry.submit(crnEntry.button_with(:value => 'Submit Changes')).body
 	rescue
+		# Does not crash if Drop/Add is not open yet
+		# # Useful if you want it to be running right when it opens
 		puts "Drop Add not open yet".color(:red)
 		return false
 	end
@@ -137,14 +143,17 @@ def registerCrn(crn, remove)
 	if add =~ /#{crn}/ && !(add =~ /Registration Errors/) then
 		return true
 	else
+		# If the new class is not successfully added and a class was dropped to make room, then re-adds the old class
 		if remove != ''
 			crnEntry = dropAdd.form_with(:action => '/ssb/prod/bwckcoms.P_Regs')
 			crnEntry.fields_with(:id => 'crn_id1').first.value = remove
 			crnEntry['CRN_IN'] = remove
 			add = crnEntry.submit(crnEntry.button_with(:value => 'Submit Changes')).body
-			if (!add =~ /#{crn}/) || add =~ /Registration Errors/
+			# If it can't re-add the old class it will then raise an exception
+			if !(add =~ /#{remove}/) || add =~ /Registration Errors/
 				raise 'Well stuff messed up: dropped the class, new class didn\'t register, couldn\'t re-register old class'
 			end
+			puts 're-registered'
 		end
 		return false
 	end
@@ -181,6 +190,7 @@ def checkCourses(courses)
 			else 
 				if (registerCrn(c[:crn], c[:remove])) then
 					puts "CRN #{c[:crn]} Registration Successful"
+					# Tracks what CRNs have been added
 					successes.push(courses.slice!(i))
 
 				else
@@ -192,6 +202,7 @@ def checkCourses(courses)
 			print "\n\n"
 		end
 		
+		# Lists the CRNs that have been added so far
 		if successes.length > 0
 			puts "These CRNs have been added successfully: ".color(:magenta)
 			successes.each_with_index do |added,i|
@@ -201,6 +212,7 @@ def checkCourses(courses)
 			puts "\n"
 		end
 
+		# When they are done adding returns true so the
 		if courses.size == 0
 		puts "All classes added".color(:yellow)
 			return true
@@ -260,8 +272,9 @@ def addCourses
 			crns.push(c) if (add =~ /yes/)
 			
 		elsif (input == "start") then
+			# When all courses have been added the program ends
 			if checkCourses(crns)
-				gets
+				break
 			end
 		else
 			puts "Invalid CRN"
@@ -272,7 +285,7 @@ end
 
 def main
 	system("clear")
-	puts "Welcome to CourseAdd by mil".color(:blue)
+	puts "Welcome to BannerStalker".color(:blue)
 	
 	bool_Login = true
 	while bool_Login
