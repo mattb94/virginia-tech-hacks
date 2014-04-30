@@ -115,7 +115,9 @@ def registerCrn(crn, remove)
 		dropAddHTML = Nokogiri::HTML(dropAdd.body)
 		
 		# Removing the old class if one was specified
-		counter = 0
+		# Counter to keep track of empty rows
+		# Starts at -2 because counter was picking up the rows before the first class
+		counter = -2
 		if remove != ''
 			dropAddHTML.css('table table tr').each_with_index do |row, i|
 				# Looks down the table to find the row with the CRN that needs to be removed
@@ -123,9 +125,11 @@ def registerCrn(crn, remove)
 					if row.css('td')[1].text =~ /#{remove}/
 						# Changes the drop down for the 'Drop' column for the CRN
 						crnEntry.field_with(:id => "action_id#{i - 3 - counter}").options[0].select
+					elsif row.css('td')[1].text =~ /^\d{5}$/ then
+					
+					else
+						counter += 1  # Counts how many 'empty' rows there are, ex. a class with additional times
 					end
-				else
-					counter += 1  # Counts how many 'empty' rows there are, ex. a class with additional times
 				end
 			end
 		end
